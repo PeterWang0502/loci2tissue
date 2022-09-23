@@ -16,7 +16,6 @@ list <- list[,c(9,10)]
 list[,1] = paste("chr", list[,1], sep="")
 list
 ```
-
 ## prepare eQTL datasets
 Tissue-specific eQTLs are used in loci2tissue to obtain significant eQTLs within the input query regions. The eQTLs will be filtered with a p-value threshold of 10^-4. An example for the eQTL set’s format id below.
 
@@ -44,7 +43,6 @@ eqtl.ag <- read.delim(ag.fileb, header=TRUE)
 eqtllist <- list(Artery_Aorta=eqtl.aa, Artery_Coronary=eqtl.ac, Adrenal_Gland=eqtl.ag)
 eqtllist
 ```
-
 ## prepare normalized gene expression datasets
 
 For each tissue-specific eQTL set used in the eQTL datasets, we will need a corresponding tissue-specific normalized gene expression set. The normalized gene expression matrices could be obtained from GTEx as well. 
@@ -61,7 +59,7 @@ chr14	36521643	36521644	ENSG00000253563.2	NKX2-1-AS1	0.0650326505390475	0.999814
 ...
 ```
 
-Below is the example code to construct the gene expression datasets.
+You will also need to obtain the means of gene expression levels for each tissue as a vector, which will later be used in the statistical tests. Below is the example code to construct the gene expression datasets.
 
 ```
 # read in gene expression set
@@ -75,7 +73,64 @@ rank.ag <- read.delim(ag.filea, header=TRUE)
 # construct normalized gene expression dataset
 ranklist <- list(Artery_Aorta=rank.aa, Artery_Coronary=rank.ac, Adrenal_Gland=rank.ag)
 ranklist
+
+# generate mean of gene expression levels vector
+meanpercentile <- c()
+for(i in 1:length(ranklist)){
+  meanpercentile <- c(meanpercentile, mean(ranklist[[i]][,7]))
+}
+meanpercentile
+```
+## prepare tissue enrichment analysis
+Below are the codes for function `tissueQuery` that performs tissue enrichment analysis.
+
+```
+tissueQuery <- function(list, size, eqtllist, ranklist, meanper){
+  average <- c()
+  egenesize <- c()
+  for(i in 1:length(eqtllist)){
+    output <- NULL
+    newout <- NULL
+    eqtl <- eqtllist[[i]]
+    egene <- ranklist[[i]]
+    egene.name <- egene[,5]
+    for(n in 1:length(list[,1])){
+      selection <- eqtl[list[n,1]==eqtl[,2],]
+      eqtl.range <- selection[,3]
+      selection <- selection[eqtl.range>=list[n,2]-size & eqtl.range<=list[n,2]+size,]
+      output <- rbind(output, selection)
+      output <- output[!duplicated(output[,4]),]
+    }
+    print(paste(names(eqtllist)[i], "eQTLs have been found", sep=" "))
+    for(n in 1:length(output[,1])){
+      b <- output[n,4]
+      if(sum(is.na(egene[b==egene.name,]))==0){
+        newout <- rbind(newout, egene[b==egene.name,])
+      }
+      newout <- newout[!duplicated(newout[,5]),]
+    }
+    print(paste(names(ranklist)[i], "eGenes have been located", sep=" "))
+    average <- c(average, mean(newout[,7]))
+    egenesize <- c(egenesize, length(newout[,1]))
+  }
+  tab <- data.frame(names(eqtllist), average, egenesize)
+  tab <- tab[!is.na(tab[,2]),]
+  p.val = rep(1, length(tab[,1]))
+  for(n in 1:length(tab[,1])){
+    p.val[n] = pnorm(meanper[n], mean=tab[n,2], sd=1/sqrt(12*tab[n,3]), lower.tail=TRUE)
+  }
+  log.p.val = rep(0, length(p.val))
+  for(n in 1:length(p.val)){
+    log.p.val[n] = -log(p.val[n])
+  }
+  tab <- data.frame(tab, p.val, log.p.val)
+  tab <- tab[rev(order(tab[,5])),]
+  return(tab)
+}
 ```
 
-## prepare tissue enrichment analysis
-Now
+now you can perform loci2tissue.
+```
+tab <- tissueQuery(list, 10000, eqtllist, ranklist, meanpercentile)
+tab
+```
